@@ -163,6 +163,111 @@
       z-index: 50;
     }
 
+
+    .menu-btn {
+      position: absolute;
+      top: max(1rem, env(safe-area-inset-top));
+      right: max(1rem, env(safe-area-inset-right));
+      width: 3rem;
+      height: 3rem;
+      border-radius: 16px;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 auto;
+      z-index: 30;
+    }
+
+    .menu-btn span,
+    .menu-btn span::before,
+    .menu-btn span::after {
+      display: block;
+      width: 1.2rem;
+      height: 2.5px;
+      border-radius: 999px;
+      background: var(--text);
+      content: "";
+      position: relative;
+    }
+
+    .menu-btn span::before { position: absolute; top: -0.38rem; }
+    .menu-btn span::after { position: absolute; top: 0.38rem; }
+
+    .menu-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(13, 39, 64, 0.18);
+      backdrop-filter: blur(5px);
+      z-index: 35;
+    }
+
+    .menu-panel {
+      position: absolute;
+      top: calc(max(1rem, env(safe-area-inset-top)) + 3.4rem);
+      right: max(1rem, env(safe-area-inset-right));
+      width: min(26rem, calc(100vw - 2rem));
+      max-height: calc(100vh - 6rem);
+      overflow: auto;
+      background: rgba(255, 255, 255, 0.78);
+      backdrop-filter: blur(14px);
+      border-radius: 22px;
+      padding: 1rem;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.14);
+      z-index: 40;
+    }
+
+    .menu-title {
+      font-size: 1rem;
+      font-weight: 800;
+      margin: 0 0 0.8rem 0;
+    }
+
+    .menu-subtitle {
+      font-size: 0.85rem;
+      font-weight: 800;
+      color: var(--subtle);
+      margin: 0.9rem 0 0.5rem 0;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .toggle-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.55rem;
+    }
+
+    .toggle-chip {
+      appearance: none;
+      border: none;
+      border-radius: 999px;
+      padding: 0.7rem 0.9rem;
+      font-size: 0.92rem;
+      font-weight: 700;
+      background: rgba(255,255,255,0.75);
+      color: var(--text);
+      box-shadow: inset 0 0 0 1.5px rgba(13,39,64,0.12);
+      flex: 0 0 auto;
+    }
+
+    .toggle-chip.off {
+      background: rgba(255,255,255,0.35);
+      color: rgba(13,39,64,0.46);
+      box-shadow: inset 0 0 0 1.5px rgba(13,39,64,0.08);
+    }
+
+    .menu-actions {
+      display: flex;
+      gap: 0.55rem;
+      margin-top: 1rem;
+    }
+
+    .menu-actions button {
+      flex: 1 1 0;
+      padding: 0.7rem 0.9rem;
+    }
+
     @media (orientation: portrait) {
       .rotate { display: flex; }
     }
@@ -171,6 +276,21 @@
 <body>
   <div id="app">
     <div class="status" id="status">Open in Safari, rotate to landscape, then tap Start.</div>
+
+    <button class="menu-btn" id="menuBtn" aria-label="Chord settings"><span></span></button>
+
+    <div class="menu-overlay hidden" id="menuOverlay"></div>
+    <div class="menu-panel hidden" id="menuPanel">
+      <div class="menu-title">Chord difficulties</div>
+      <div class="menu-subtitle">Quick filters</div>
+      <div class="toggle-grid" id="presetGrid"></div>
+      <div class="menu-subtitle">Chord types</div>
+      <div class="toggle-grid" id="typeGrid"></div>
+      <div class="menu-actions">
+        <button id="allChordsBtn">All</button>
+        <button id="closeMenuBtn">Done</button>
+      </div>
+    </div>
 
     <div class="center">
       <div class="key-label" id="keyLabel">Key: —</div>
@@ -226,6 +346,13 @@
     const nextBtn = document.getElementById("nextBtn");
     const hintBtn = document.getElementById("hintBtn");
     const displayModeBtn = document.getElementById("displayModeBtn");
+    const menuBtn = document.getElementById("menuBtn");
+    const menuOverlay = document.getElementById("menuOverlay");
+    const menuPanel = document.getElementById("menuPanel");
+    const presetGrid = document.getElementById("presetGrid");
+    const typeGrid = document.getElementById("typeGrid");
+    const allChordsBtn = document.getElementById("allChordsBtn");
+    const closeMenuBtn = document.getElementById("closeMenuBtn");
 
     let audioContext = null;
     let analyser = null;
@@ -239,6 +366,17 @@
     let lastDetectedText = "—";
     let lastAdvanceAt = 0;
     let displayMode = "notes";
+
+    const CHORD_PRESETS = [
+      { id: "triads", label: "Triads", matches: chordType => ["", "m", "dim", "+", "sus2", "sus4"].includes(chordType.suffix) },
+      { id: "7s", label: "7s", matches: chordType => ["7", "maj7", "m7", "m(maj7)", "m7♭5", "dim7"].includes(chordType.suffix) },
+      { id: "color", label: "Color Chords", matches: chordType => ["add9", "6", "m6"].includes(chordType.suffix) },
+      { id: "advanced", label: "Advanced", matches: chordType => chordType.category === "advanced" },
+      { id: "inversions", label: "Inversions", special: "inversions" }
+    ];
+
+    const selectedChordTypes = new Set(CHORD_TYPES.map(chordType => chordType.name));
+    let allowInversions = true;
 
     function renderEnvironment() {
       const secure = window.isSecureContext ? "secure" : "not secure";
@@ -317,10 +455,99 @@
       displayModeBtn.textContent = displayMode === "notes" ? "Scale Degrees" : "Note Names";
     }
 
+    function getEnabledChordTypes() {
+      const enabled = CHORD_TYPES.filter(chordType => selectedChordTypes.has(chordType.name));
+      return enabled.length ? enabled : CHORD_TYPES;
+    }
+
+    function updateMenuButtonStates() {
+      presetGrid.querySelectorAll("[data-preset-id]").forEach((btn) => {
+        const preset = CHORD_PRESETS.find(item => item.id === btn.dataset.presetId);
+        let active = false;
+        if (preset.special === "inversions") {
+          active = allowInversions;
+        } else {
+          const matched = CHORD_TYPES.filter(chordType => preset.matches(chordType));
+          active = matched.length > 0 && matched.every(chordType => selectedChordTypes.has(chordType.name));
+        }
+        btn.classList.toggle("off", !active);
+      });
+
+      typeGrid.querySelectorAll("[data-type-name]").forEach((btn) => {
+        const active = selectedChordTypes.has(btn.dataset.typeName);
+        btn.classList.toggle("off", !active);
+      });
+    }
+
+    function buildDifficultyMenu() {
+      presetGrid.innerHTML = "";
+      typeGrid.innerHTML = "";
+
+      CHORD_PRESETS.forEach((preset) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "toggle-chip";
+        btn.textContent = preset.label;
+        btn.dataset.presetId = preset.id;
+        btn.addEventListener("click", () => {
+          if (preset.special === "inversions") {
+            allowInversions = !allowInversions;
+          } else {
+            const matched = CHORD_TYPES.filter(chordType => preset.matches(chordType));
+            const allSelected = matched.every(chordType => selectedChordTypes.has(chordType.name));
+            matched.forEach((chordType) => {
+              if (allSelected) {
+                if (selectedChordTypes.size > 1) selectedChordTypes.delete(chordType.name);
+              } else {
+                selectedChordTypes.add(chordType.name);
+              }
+            });
+            if (!selectedChordTypes.size) {
+              selectedChordTypes.add(CHORD_TYPES[0].name);
+            }
+          }
+          updateMenuButtonStates();
+          if (target) {
+            setStatus("Chord filters updated.");
+          }
+        });
+        presetGrid.appendChild(btn);
+      });
+
+      CHORD_TYPES.forEach((chordType) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "toggle-chip";
+        btn.textContent = chordType.suffix || "major";
+        btn.dataset.typeName = chordType.name;
+        btn.addEventListener("click", () => {
+          const isActive = selectedChordTypes.has(chordType.name);
+          if (isActive && selectedChordTypes.size > 1) {
+            selectedChordTypes.delete(chordType.name);
+          } else {
+            selectedChordTypes.add(chordType.name);
+          }
+          updateMenuButtonStates();
+          if (target) {
+            setStatus("Chord filters updated.");
+          }
+        });
+        typeGrid.appendChild(btn);
+      });
+
+      updateMenuButtonStates();
+    }
+
+    function setMenuOpen(isOpen) {
+      menuOverlay.classList.toggle("hidden", !isOpen);
+      menuPanel.classList.toggle("hidden", !isOpen);
+    }
+
     function buildTarget() {
       const root = randInt(12);
-      const chordType = choose(CHORD_TYPES);
-      const inversion = randInt(chordType.intervals.length);
+      const enabledChordTypes = getEnabledChordTypes();
+      const chordType = choose(enabledChordTypes);
+      const inversion = allowInversions ? randInt(chordType.intervals.length) : 0;
       const pcs = chordType.intervals.map(i => (root + i) % 12);
       const bassPc = pcs[inversion];
       const key = Math.random() < 0.5 ? choose(MAJOR_KEYS) : choose(MINOR_KEYS);
@@ -539,8 +766,21 @@
       renderTarget();
     });
 
+    menuBtn.addEventListener("click", () => setMenuOpen(true));
+    closeMenuBtn.addEventListener("click", () => setMenuOpen(false));
+    menuOverlay.addEventListener("click", () => setMenuOpen(false));
+    allChordsBtn.addEventListener("click", () => {
+      CHORD_TYPES.forEach(chordType => selectedChordTypes.add(chordType.name));
+      allowInversions = true;
+      updateMenuButtonStates();
+      setStatus("All chord types enabled.");
+    });
+
+    buildDifficultyMenu();
     renderEnvironment();
     updateDisplayModeButton();
+
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") setMenuOpen(false); });
 
     document.addEventListener("visibilitychange", async () => {
       if (document.visibilityState === "visible" && audioContext && audioContext.state === "suspended") {
